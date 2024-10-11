@@ -1,0 +1,161 @@
+create table ipl_match(id int,city varchar(20),match_date date,player_of_match varchar(20),
+venue varchar(80), neutral_venue int,team1 varchar(30),team2 varchar(30),toss_winner varchar(30),toss_decision varchar(20),
+winner varchar(30),result varchar(20),result_margin int,eliminator varchar(20),method varchar(20),umpire1 varchar(50),umpire2 varchar(50));
+
+
+create table ipl_player_data(id int,inning int,over int,ball int,batsman varchar(50),non_striker varchar(50),
+bowler varchar(50),batsman_runs int,extra_runs int,total_runs int,is_wicket int,
+dismissal_kind varchar(50),player_dismissed varchar(50),fielder varchar(50),extras_type varchar(50),batting_team varchar(50),bowling_team varchar(50));
+
+copy ipl_match from 'C:\Program Files\PostgreSQL\16\data\IPL Dataset\IPL Dataset\IPL_matches.csv' csv header;
+
+copy ipl_player_data from 'C:\Program Files\PostgreSQL\16\data\IPL Dataset\IPL Dataset\IPL_BALL.csv' delimiter ',' csv header;
+
+select * from ipl_match;
+select * from ipl_player_data;
+
+
+/** Best batsman Striker**/
+select batsman,cast(sum(batsman_runs) as float)/sum(case when extras_type!='wides' then 1 else 0 end)*100 as strike_rate from ipl_player_data where extras_type!='wides' group by batsman 
+having sum( case when extras_type!='wides' then 1 else 0 end)>500 
+order by strike_rate desc limit 10;
+
+
+/** Avg Batsman**/
+
+select a.batsman ,(sum(batsman_runs)*1.0/sum(case when is_wicket=1 then is_wicket end)) as average from ipl_player_data as a left join ipl_match as b on a.id=b.id 
+group by a.batsman having count(distinct(extract(year from match_date)))>2 order by average desc limit 10;
+
+
+/**Hard hiiting Batsman**/
+select a.batsman,sum(case when a.batsman_runs in (4,6) then 1 else 0 end) as boundaries,sum(a.batsman_runs) as total_runs,concat((sum(case when a.batsman_runs in (4,6) then a.batsman_runs else 0 end)*100)/(sum(a.batsman_runs)),'%') as percentage_of_boundry 
+from ipl_player_data as a left join ipl_match as b on b.id=a.id
+group by a.batsman having count(distinct(extract(year from match_date)))>2 order by percentage_of_boundry desc limit 10;
+
+
+/** Good economi bowler**/
+
+select a.bowler,(cast((total_runs)as decimal(10,2))/(overs))as economy from (select bowler,sum(total_runs)as total_runs,
+count(ball)/6 as overs from ipl_player_data 
+	group by bowler having count(ball)>500) as a order by economy asc limit 10;
+
+/** high strick bowler**/
+select bowler,cast(strike_rate as decimal(3,1)),dense_rank() over(order by strike_rate) from (select bowler,cast((total_balls) as decimal(10,2))/(wickets) as strike_rate 
+from( select bowler,total_balls,sum(is_wicket)as wickets from(
+select bowler,is_wicket,count(ball) over (partition by bowler)as total_balls 
+from ipl_player_data)as a where total_balls>500 and is_wicket>0 group by bowler,total_balls )as b )as c limit 10;
+
+
+	/** All Rounder **/
+
+	SELECT m.player,bowling_strike_rate,batting_strike_rate FROM (SELECT bowler AS player, CAST(strike_rate AS DECIMAL(3,1))AS bowling_strike_rate FROM (
+	SELECT bowler,CAST(total_balls AS DECIMAL(10,2))/wickets AS strike_rate FROM (SELECT bowler,total_balls,SUM(is_wicket)AS wickets FROM (
+	SELECT bowler,is_wicket,COUNT(ball) OVER (PARTITION BY bowler) AS total_balls FROM ipl_player_data) AS a WHERE total_balls > 300 AND is_wicket > 0 
+	GROUP BY bowler, total_balls) AS b) AS c ) AS m 
+	INNER JOIN (
+	SELECT batsman AS player, CAST(SUM(batsman_runs) AS FLOAT) / COUNT(ball) * 100 AS batting_strike_rate FROM ipl_player_data WHERE extras_type != 'wides' 
+	GROUP BY batsman HAVING COUNT(ball) > 500) AS n ON m.player = n.player 
+	ORDER BY m.bowling_strike_rate, n.batting_strike_rate limit 10;
+
+
+	/**Wicket Keeper**/
+
+SELECT m.player,bowling_strike_rate,batting_strike_rate FROM (SELECT bowler AS player, CAST(strike_rate AS DECIMAL(3,1))AS bowling_strike_rate FROM (
+SELECT bowler,CAST(total_balls AS DECIMAL(10,2)) / wickets AS strike_rate FROM ( SELECT bowler, total_balls, SUM(is_wicket)AS wickets FROM (
+SELECT bowler,is_wicket,COUNT(ball) OVER (PARTITION BY bowler) AS total_balls FROM ipl_player_data)AS a WHERE total_balls>300 AND is_wicket>0 GROUP BY bowler,total_balls)AS b)AS c)AS m 
+INNER JOIN(
+SELECT batsman AS player, CAST(SUM(batsman_runs) AS FLOAT)/COUNT(ball)*100 AS batting_strike_rate FROM ipl_player_data WHERE extras_type!='wides'
+GROUP BY batsman HAVING COUNT(ball)>300) AS n ON m.player = n.player 
+WHERE bowling_strike_rate<9 OR batting_strike_rate>120
+ORDER BY m.bowling_strike_rate,n.batting_strike_rate limit 2;
+
+
+/** create match and deliveries table**/
+
+create table matches(id int,city varchar(20),match_date date,player_of_match varchar(20),
+venue varchar(80),neutral_venue int,
+team1 varchar(30),team2 varchar(30),toss_winner varchar(30),toss_decision varchar(20),
+winner varchar(30),result varchar(20),
+result_margin int,eliminator varchar(20),method varchar(20),umpire1 varchar(50),umpire2 varchar(50));
+
+copy matches from 'C:\Program Files\PostgreSQL\16\data\IPL Dataset\IPL Dataset\IPL_matches.csv' csv header;
+
+create table Deliveries(id int,inning int,over int,ball int,batsman varchar(50),non_striker varchar(50),
+bowler varchar(50),batsman_runs int,extra_runs int,total_runs int,is_wicket int,
+dismissal_kind varchar(50),player_dismissed varchar(50),
+fielder varchar(50),extras_type varchar(50),batting_team varchar(50),bowling_team varchar(50));
+
+copy Deliveries from 'C:\Program Files\PostgreSQL\16\data\IPL Dataset\IPL Dataset\IPL_BALL.csv' delimiter ',' csv header;
+
+
+/** 1. Get the count of cities that have hosted an IPL match **/
+
+select count(city) AS TOTAL_CITY from matches;
+
+
+/** 2. Create table deliveries_v02 with all the columns of the table ‘deliveries’ and an additional column ball_result containing values boundary, dot or other depending on the total_run (boundary for >= 4, dot for 0 and other for any other number)
+**/
+
+create table deliveries_v02 as (
+select *,case 
+when batsman_runs in (4,6) then 'boundary'
+when batsman_runs=0 then 'dot'
+else 'other' end ball_type
+from Deliveries);
+
+-- 3. Write a query to fetch the total number of boundaries and dot balls from the deliveries_v02 table.
+
+select ball_type,count(ball_type) from deliveries_v02 
+where ball_type='boundary' or ball_type='dot'
+group by ball_type;
+
+-- 4. Write a query to fetch the total number of boundaries scored by each team from the deliveries_v02 table and order it in descending order of the number of boundaries scored.
+
+select batting_team,count(ball_type) as total_boundary from
+deliveries_v02 where ball_type='boundary'
+group by batting_team order by total_boundary desc;
+
+
+-- 5. Write a query to fetch the total number of dot balls bowled by each team and order it in descending order of the total number of dot balls bowled.
+
+select bowling_team,count(ball_type)as total_dot_ball from 
+deliveries_v02 where ball_type='dot'
+group by bowling_team
+order by total_dot_ball desc;
+
+
+-- 6. Write a query to fetch the total number of dismissals by dismissal kinds where dismissal kind is not NA
+
+select dismissal_kind,count(dismissal_kind) total_dismissals  from deliveries_v02 group by dismissal_kind;
+
+-- 7. Write a query to get the top 5 bowlers who conceded maximum extra runs from the deliveries table
+ select * from deliveries_v02;
+select * from matches;
+
+select bowler,sum(extra_runs)as conceded_extra_runs from deliveries_v02 group by bowler order by bowler desc limit 5;
+
+-- 8. Write a query to create a table named deliveries_v03 with all the columns of deliveries_v02 table and two additional column (named venue and match_date) of venue and date from table matches
+
+create table deliveries_v03 as (select b.*,a.venue as venue,a.match_date as date from deliveries_v02 as b full join matches as a on a.id=b.id);
+
+	-- 9. Write a query to fetch the total runs scored for each venue and order it in the descending order of total runs scored.
+
+select venue,sum(total_runs) as venue_total_run from deliveries_v03
+group by venue order by venue_total_run desc;
+
+
+-- 10. Write a query to fetch the year-wise total runs scored at Eden Gardens and order it in the descending order of total runs scored.
+
+select distinct extract(year from date) as match_year,sum(total_runs)as total_run
+from deliveries_v03 where lower(venue)='eden gardens'
+group by match_year
+order by total_run desc;
+
+
+
+	
+
+
+
+
+
